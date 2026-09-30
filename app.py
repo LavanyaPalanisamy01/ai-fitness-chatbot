@@ -8,7 +8,7 @@ OLLAMA_HOST = "http://127.0.0.1:11434"
 OLLAMA_MODEL = "llama3.2:3b"
 
 # Configuration for cloud Hugging Face model
-HF_MODEL = "Qwen/Qwen2.5-7B-Instruct-1M"
+HF_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
 
 # Detect Hugging Face token from Streamlit secrets or environment
 hf_token = None
