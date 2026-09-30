@@ -1,11 +1,25 @@
+import os
 import streamlit as st
-import ollama
 
 from fitness import build_system_prompt, calculate_bmi
 
 # Configuration for local Ollama instance
 OLLAMA_HOST = "http://127.0.0.1:11434"
 OLLAMA_MODEL = "llama3.2:3b"
+
+# Configuration for cloud Hugging Face model
+HF_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+
+# Detect Hugging Face token from Streamlit secrets or environment
+hf_token = None
+try:
+    if "HF_TOKEN" in st.secrets:
+        hf_token = st.secrets["HF_TOKEN"]
+except Exception:
+    pass
+
+if not hf_token:
+    hf_token = os.getenv("HF_TOKEN")
 
 st.set_page_config(page_title="AI Fitness Chatbot", page_icon="💪", layout="centered")
 
@@ -35,7 +49,11 @@ if st.sidebar.button("🗑️ Reset Chat"):
     st.session_state.messages = []
     st.rerun()
 
-st.sidebar.caption(f"🤖 Local Model: `{OLLAMA_MODEL}` (Free / Offline)")
+# Display active engine
+if hf_token:
+    st.sidebar.caption(f"☁️ Cloud Model: `{HF_MODEL}` (Hugging Face)")
+else:
+    st.sidebar.caption(f"🤖 Local Model: `{OLLAMA_MODEL}` (Ollama)")
 
 # --- Main Screen: Chatbot ---
 st.title("💪 AI Fitness Chatbot")
@@ -67,9 +85,6 @@ if prompt := st.chat_input("Ask about workout routines, nutrition advice, or fit
         bmi_category=str(bmi_category),
     )
 
-    # Initialize local Ollama client
-    client = ollama.Client(host=OLLAMA_HOST)
-
     # Prepare message payload with system context and session history
     messages_payload = [{"role": "system", "content": system_prompt}] + st.session_state.messages
 
@@ -78,20 +93,40 @@ if prompt := st.chat_input("Ask about workout routines, nutrition advice, or fit
         full_response = ""
 
         try:
-            # Stream the response from the local model
-            response_stream = client.chat(
-                model=OLLAMA_MODEL,
-                messages=messages_payload,
-                stream=True,
-            )
-            for chunk in response_stream:
-                token = chunk.get("message", {}).get("content", "")
-                full_response += token
-                response_placeholder.markdown(full_response + "▌")
+            if hf_token:
+                # Cloud deployment: Hugging Face InferenceClient
+                from huggingface_hub import InferenceClient
+
+                hf_client = InferenceClient(model=HF_MODEL, token=hf_token)
+                response_stream = hf_client.chat.completions.create(
+                    messages=messages_payload,
+                    stream=True,
+                    max_tokens=1024,
+                )
+                for chunk in response_stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        token = chunk.choices[0].delta.content
+                        full_response += token
+                        response_placeholder.markdown(full_response + "▌")
+            else:
+                # Local development: Ollama
+                import ollama
+
+                client = ollama.Client(host=OLLAMA_HOST)
+                response_stream = client.chat(
+                    model=OLLAMA_MODEL,
+                    messages=messages_payload,
+                    stream=True,
+                )
+                for chunk in response_stream:
+                    token = chunk.get("message", {}).get("content", "")
+                    full_response += token
+                    response_placeholder.markdown(full_response + "▌")
 
             response_placeholder.markdown(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})
 
         except Exception as e:
             response_placeholder.empty()
-            st.error(f"Could not connect to local Ollama server at {OLLAMA_HOST}. Details: {e}")
+            provider_label = "Hugging Face Cloud" if hf_token else f"Local Ollama server at {OLLAMA_HOST}"
+            st.error(f"Could not connect to {provider_label}. Details: {e}")
